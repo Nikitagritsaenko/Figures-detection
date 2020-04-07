@@ -46,8 +46,6 @@ def find_contours(im):
 
 
 test_img = image_src_lines.copy()
-# test_img = cv.cvtColor(test_img, cv.COLOR_BGR2GRAY)
-#res = find_contours(test_img)
 threshold = threshold_otsu(test_img)
 test_img = test_img > threshold
 
@@ -55,6 +53,23 @@ test_img = binary_fill_holes(test_img)
 kernel = np.ones((5, 5), np.uint8)
 test_img = binary_opening(test_img)
 
-plt.figure(1, figsize=(15, 15))
-imshow(test_img, cmap='gray')
+#plt.figure(1, figsize=(15, 15))
+#imshow(test_img, cmap='gray')
+#plt.show()
+
+#------------------------corner detection----------------------------------------------------------------
+
+img = test_img.copy()
+gray = img
+
+gray = np.float32(gray)
+dst = cv.cornerHarris(gray, 2, 3, 0.04)
+
+#result is dilated for marking the corners, not important
+dst = cv.dilate(dst, None)
+
+# Threshold for an optimal value, it may vary depending on the image.
+img[dst > 0.01 * dst.max()] = 1
+
+imshow(img, cmap='gray')
 plt.show()
