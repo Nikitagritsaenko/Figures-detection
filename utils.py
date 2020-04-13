@@ -12,7 +12,7 @@ def convex_hull_graham(points):
     TURN_LEFT, TURN_RIGHT, TURN_NONE = (1, -1, 0)
 
     def cmp(a, b):
-        return (a > b) - (a < b)
+        return ((a > b).astype(np.float32) - (a < b).astype(np.float32)).astype(np.bool)
 
     def turn(p, q, r):
         return cmp((q[0] - p[0]) * (r[1] - p[1]) - (r[0] - p[0]) * (q[1] - p[1]), 0)
@@ -77,3 +77,12 @@ def compare_figures(fig1, fig2):
 
 def rotate_list(l, n):
     return l[n:] + l[:n]
+
+
+def is_params_equals(rho1, theta1, rho2, theta2):
+    rho_err = 3
+    theta_err = 0.03
+
+    if np.abs(theta1 - theta2) < theta_err and np.abs(rho1 - rho2) < rho_err:
+        return True
+    return False

@@ -6,6 +6,7 @@ from skimage.morphology import binary_opening
 from skimage.filters import threshold_otsu
 from skimage import color
 from utils import *
+from checker import *
 
 
 def find_shapes_point_list(src):
@@ -40,36 +41,112 @@ def get_rid_of_noise(img):
     dst = binary_fill_holes(dst)
     dst = binary_opening(dst)
 
+    #plt.imshow(dst, cmap='gray')
+    #plt.show()
+
     return dst
 
 
 def find_figure_corners(img):
-    figure_corners_list = []
-    dst = img.copy()
-    dst = np.float32(dst)
-    dst = cv.cornerHarris(dst, 2, 3, 0.04)
-    dst = cv.dilate(dst, None)
-    for x in range(dst.shape[0]):
-        for y in range(dst.shape[1]):
-            threshold = 0.1 * dst.max()
-            if dst[x, y] > threshold:
-                local_max = 0
-                local_max_ind = (0, 0)
-                r = 5
-                u_left = np.max([x - r, 0])
-                u_right = np.min([x + r, dst.shape[0] - 1])
-                v_left = np.max([y - r, 0])
-                v_right = np.min([y + r, dst.shape[1] - 1])
-                for u in range(u_left, u_right):
-                    for v in range(v_left, v_right):
-                        if local_max < dst[u, v]:
-                            local_max = dst[u, v]
-                            local_max_ind = (u, v)
-                        dst[u, v] = 0
-                if local_max > threshold:
-                    figure_corners_list.append(local_max_ind)
+    res = img.astype(np.uint8)
+    ret, thresh = cv.threshold(res, 0.5, 1, 0)
+    _, contours, _ = cv.findContours(thresh, cv.RETR_TREE, cv.CHAIN_APPROX_NONE)
+    for x in range(res.shape[0]):
+        for y in range(res.shape[1]):
+            res[x, y] = 0
+    cv.drawContours(res, contours, -1, 1)
+    #plt.imshow(res, cmap='gray')
+    #plt.show()
+    lines = cv.HoughLinesP(res, 0.5, np.pi / 360, 10, minLineLength=5, maxLineGap=5)
 
-    return figure_corners_list
+    line_params = []
+    for line in lines:
+        x1, y1, x2, y2 = line[0]
+        k = (y2 - y1) / (x2 - x1)
+        b = y1 - k * x1
+        theta = np.arctan(-1/k)
+        rho = b * np.sin(theta)
+        line_params.append((rho, theta, x1, y1, x2, y2))
+        #cv.line(res, (x1, y1), (x2, y2), (255, 255, 255), 2)
+        #plt.imshow(res, cmap='gray')
+        #plt.show()
+    line_params = sorted(line_params, key = lambda x: (x[0], x[1]))
+
+    lines_unique = []
+    merged_line = []
+
+    for i in range(len(line_params) - 1):
+        rho1 = line_params[i][0]
+        theta1 = line_params[i][1]
+        rho2 = line_params[i+1][0]
+        theta2 = line_params[i+1][1]
+        x11 = line_params[i][2]
+        y11 = line_params[i][3]
+        x12 = line_params[i][4]
+        y12 = line_params[i][5]
+        x21 = line_params[i + 1][2]
+        y21 = line_params[i + 1][3]
+        x22 = line_params[i + 1][4]
+        y22 = line_params[i + 1][5]
+        if len(merged_line) == 0:
+            merged_line = [x11, y11, x12, y12]
+
+        if is_params_equals(rho1, theta1, rho2, theta2):
+            x1m, y1m, x2m, y2m = merged_line
+            x_min = np.min([x11, x12, x21, x22, x1m, x2m])
+            x_max = np.max([x11, x12, x21, x22, x1m, x2m])
+            y_min = np.min([y11, y12, y21, y22, y1m, y2m])
+            y_max = np.max([y11, y12, y21, y22, y1m, y2m])
+            if theta1 > 0:
+                merged_line = [x_max, y_min, x_min, y_max]
+            else:
+                merged_line = [x_max, y_max, x_min, y_min]
+        else:
+            lines_unique.append(merged_line)
+            merged_line = []
+
+    if len(merged_line) != 0:
+        lines_unique.append(merged_line)
+    else:
+        lines_unique.append(list(line_params[-1][2:6]))
+
+    curr_point = (lines_unique[0][2], lines_unique[0][3])
+    curr_line_id = 0
+    corners = []
+    visited = []
+
+    while len(corners) != len(lines_unique):
+        min_dist = np.Inf
+        for i in range(len(lines_unique)):
+            if i == curr_line_id:
+                continue
+            line = lines_unique[i]
+            p1 = (line[0], line[1])
+            p2 = (line[2], line[3])
+            dist1 = dist(p1, curr_point)
+            dist2 = dist(p2, curr_point)
+
+            if p1 not in visited and dist1 < min_dist:
+                min_dist = dist1
+                next_point_id = 1
+                curr_line_id = i
+            if p2 not in visited and dist2 < min_dist:
+                min_dist = dist2
+                next_point_id = 0
+                curr_line_id = i
+
+        next_point = (lines_unique[curr_line_id][next_point_id * 2],
+                      lines_unique[curr_line_id][next_point_id * 2 + 1])
+
+        next_point_neighbour = (lines_unique[curr_line_id][(next_point_id - 1) * 2],
+                                lines_unique[curr_line_id][(next_point_id - 1) * 2 + 1])
+
+        corners.append((int((curr_point[1] + next_point_neighbour[1]) / 2),
+                        int((curr_point[0] + next_point_neighbour[0]) / 2)))
+        visited.append(next_point)
+        curr_point = next_point
+
+    return corners
 
 
 def find_angle_and_shift(basis, fig, scale):
@@ -159,9 +236,19 @@ def find_figures(N, basis_figures, src_image):
             for p in shape:
                 img_with_one_figure[p[0], p[1]] = 0
 
-        figure_corners = find_figure_corners(img_with_one_figure)
-        figure_corners = convex_hull_graham(figure_corners)
-        answer_list.append((solve_problem(N, basis_figures, figure_corners)))
+        corners = find_figure_corners(img_with_one_figure)
+
+        for x in range(img_with_one_figure.shape[0]):
+            for y in range(img_with_one_figure.shape[1]):
+                img_with_one_figure[x, y] = 0
+
+        for p in corners:
+            img_with_one_figure[p[0], p[1]] = 1
+
+        #plt.imshow(img_with_one_figure, cmap='gray')
+        #plt.show()
+
+        answer_list.append((solve_problem(N, basis_figures, corners)))
 
     return answer_list
 
@@ -177,16 +264,23 @@ def main(args):
 
     src_image = plt.imread(args.image)
     src_image_gray = color.rgb2gray(src_image)
+
     result = find_figures(N, basis_figures, src_image_gray)
+
+    all_answers = []
     print(len(result))
     for ans in result:
         answer_list = list(ans)
+        all_answers.append(answer_list)
         print(*answer_list, sep=', ')
+
+    #plot_results(all_answers, basis_figures, src_image_gray)
+    plt.show()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Serve the application')
-    parser.add_argument('-i', '--image', default='./test_300_200.png')
+    parser.add_argument('-i', '--image', default='./test_300_200_2.png')
     parser.add_argument('-s', '--structure', default='./002_line_in.txt')
     args = parser.parse_args()
     main(args)
